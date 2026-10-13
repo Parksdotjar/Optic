@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "optic",
+  "version": "${version}",
+  "name": "Optic",
+  "description": "A Minecraft-native recorder. Experimental performance-first foundation.",
+  "environment": "client",
+  "mixins": ["optic.mixins.json"],
+  "entrypoints": { "client": ["dev.optic.OpticClient"] },
+  "depends": { "fabricloader": ">=${loader}", "minecraft": "${minecraft}", "java": ">=${java}", "fabric-api": "*" }
+}

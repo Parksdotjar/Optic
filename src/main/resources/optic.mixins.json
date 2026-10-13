@@ -1,0 +1,1 @@
+{"required":true,"package":"dev.optic.compat.mixin","compatibilityLevel":"JAVA_21","client":["MinecraftCaptureMixin","GameRendererStateMixin","GuiStateMixin","GuiRendererMixin","GuiLayersMixin","ChatLayerMixin","SubtitleMixin"],"injectors":{"defaultRequire":1}}

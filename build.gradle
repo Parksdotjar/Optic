@@ -1,0 +1,183 @@
+plugins { id 'dev.kikugie.loom-back-compat'; id 'maven-publish' }
+def modern = project.minecraft_version in ['26.2', '26.3']
+def requiredJava = modern ? 25 : 21
+def backend = modern ? 'renderpearl' : 'legacy'
+version = project.mod_version
+group = project.maven_group
+base { archivesName = 'optic-mc' + project.minecraft_version }
+repositories { mavenCentral() }
+configurations { productionTestMods }
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    loomx.applyMojangMappings()
+    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+    productionTestMods "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+    testImplementation platform('org.junit:junit-bom:5.11.4')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+processResources {
+    inputs.property 'version', project.version
+    inputs.property 'minecraft', project.minecraft_version
+    inputs.property 'java', requiredJava
+    inputs.property 'loader', project.loader_version
+    filesMatching('fabric.mod.json') {
+        expand version: project.version, minecraft: project.minecraft_version, java: requiredJava, loader: project.loader_version
+    }
+    filesMatching('optic.mixins.json') {
+        filter { line -> modern
+            ? '{"required":true,"package":"dev.optic.compat.mixin","compatibilityLevel":"JAVA_25","client":["MinecraftCaptureMixin","GameRendererTargetMixin","GuiSourceMixin","GuiStateMixin","GuiRendererMixin","HudLayersMixin","ChatLayerMixin","SubtitleMixin"],"injectors":{"defaultRequire":1}}'
+            : line
+        }
+    }
+}
+def windowsAudioOutput = layout.buildDirectory.dir('generated/audio-resources')
+sourceSets.main.resources.srcDir(windowsAudioOutput)
+sourceSets.main.java.srcDir(rootProject.file('src/' + backend + '/java'))
+sourceSets.test.java.setSrcDirs([rootProject.file('src/test/java')])
+if(modern) sourceSets.test.java.exclude('dev/optic/capture/ScaleBenchmark.java')
+tasks.register('compileWindowsAudio', Exec) {
+    onlyIf { System.getProperty('os.name').toLowerCase().contains('windows') }
+    inputs.file(rootProject.file('native/windows/ProcessAudio.cs'))
+    outputs.file(windowsAudioOutput.map { it.file('native/windows/optic-process-audio.exe') })
+    doFirst { windowsAudioOutput.get().dir('native/windows').asFile.mkdirs() }
+    commandLine 'C:/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe', '/nologo', '/optimize+', '/platform:x64', '/target:exe',
+        '/out:' + windowsAudioOutput.get().file('native/windows/optic-process-audio.exe').asFile.absolutePath,
+        rootProject.file('native/windows/ProcessAudio.cs').absolutePath
+}
+processResources.dependsOn('compileWindowsAudio')
+tasks.withType(JavaCompile).configureEach { options.release = requiredJava }
+java { toolchain.languageVersion = JavaLanguageVersion.of(requiredJava); withSourcesJar() }
+tasks.named('sourcesJar') {
+    dependsOn tasks.named('compileWindowsAudio')
+    // Legacy uses real adapter sources instead of the empty, commented modern templates.
+    if (!modern) eachFile {
+        if (path in ['dev/optic/compat/CleanCapture.java', 'dev/optic/compat/GlFrameCapture.java',
+                     'dev/optic/compat/mixin/MinecraftCaptureMixin.java'] &&
+            !file.toPath().startsWith(rootProject.file('src/legacy/java').toPath())) exclude()
+    }
+}
+test { useJUnitPlatform() }
+tasks.register('productionSmoke', net.fabricmc.loom.task.prod.ClientProductionRunTask) {
+    outputs.upToDateWhen { false }
+    mods.from(loomx.modJar, configurations.productionTestMods)
+    runDir = layout.buildDirectory.dir('production-smoke')
+    jvmArgs.addAll('-Xmx2G', '-XX:ActiveProcessorCount=4', '-Doptic.smoke=true', '-Doptic.smokeSeconds=6', '-Doptic.pauseSmoke=true')
+    doFirst {
+        def optionsFile=layout.buildDirectory.file('production-smoke/options.txt').get().asFile
+        optionsFile.parentFile.mkdirs()
+        def options=optionsFile.exists()?optionsFile.getText('UTF-8'):''
+        options=options.replaceAll('(?m)^onboardAccessibility:.*\\r?\\n?', '')
+        optionsFile.setText(options+'\nonboardAccessibility:false\n', 'UTF-8')
+    }
+    doLast {
+        def logFile = layout.buildDirectory.file('production-smoke/logs/latest.log').get().asFile
+        def log = logFile.exists() ? logFile.getText('UTF-8') : ''
+        def completed = modern ? log.contains('OPTIC_26_SMOKE_FINISHED saved=true')
+            : log.contains('OPTIC_SMOKE_FINISHED') && log.contains('Recording saved')
+        if (!completed) throw new GradleException('Client exited without completing the recording smoke test; inspect ' + logFile)
+    }
+}
+tasks.register('benchmarkSummary', JavaExec) {
+    dependsOn classes
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'dev.optic.diagnostics.BenchmarkSummary'
+    args providers.gradleProperty('traceDirectory').getOrElse('run/v5-benchmark')
+}
+loom { runs { client { if(project.hasProperty('smoke')) vmArg '-Doptic.smoke=true'; if(project.hasProperty('raw')) vmArg '-Doptic.raw=true' } } }
+loom.runs.client {
+    if(project.hasProperty('workflowSmoke')) vmArg '-Doptic.workflowSmoke=true'
+    if(project.hasProperty('advancedSmoke')) { vmArg '-Doptic.workflowSmoke=true'; vmArg '-Doptic.advancedSmoke=true' }
+    if(project.hasProperty('supportSmoke')) { vmArg '-Doptic.workflowSmoke=true'; vmArg '-Doptic.supportSmoke=true' }
+    if(project.hasProperty('menuSmoke')) { vmArg '-Doptic.workflowSmoke=true'; vmArg '-Doptic.menuSmoke=true' }
+    if(project.hasProperty('menuWorld')) programArgs '--quickPlaySingleplayer', project.menuWorld
+    if(project.hasProperty('workflowRecording')) vmArg '-Doptic.workflowRecording=true'
+    if(project.hasProperty('markerSmoke')) { vmArg '-Doptic.markerSmoke=true'; vmArg '-Doptic.replaySmoke=true'; programArgs '--quickPlaySingleplayer', project.markerSmoke }
+    if(project.hasProperty('replaySmoke')) { vmArg '-Doptic.replaySmoke=true'; programArgs '--quickPlaySingleplayer', project.replaySmoke }
+    if(project.hasProperty('benchmark')) vmArg "-Doptic.benchmark=${project.benchmark}"
+    if(project.hasProperty('benchmarkSeconds')) vmArg "-Doptic.benchmarkSeconds=${project.benchmarkSeconds}"
+    if(project.hasProperty('benchmarkLabel')) vmArg "-Doptic.benchmarkLabel=${project.benchmarkLabel}"
+    if(project.hasProperty('benchmarkWorld')) programArgs '--quickPlaySingleplayer', project.benchmarkWorld
+    if(project.hasProperty('failPersistentSetup')) vmArg '-Doptic.failPersistentSetup=true'
+    if(project.hasProperty('smokeQuality')) vmArg "-Doptic.smokeQuality=${project.smokeQuality}"
+    if(project.hasProperty('smokeAspect')) vmArg "-Doptic.smokeAspect=${project.smokeAspect}"
+    if(project.hasProperty('smokeResize')) vmArg '-Doptic.smokeResize=true'
+    if(project.hasProperty('smokeWide')) vmArg '-Doptic.smokeWide=true'
+    if(project.hasProperty('cleanFailureAfter')) vmArg "-Doptic.cleanFailureAfter=${project.cleanFailureAfter}"
+    if(project.hasProperty('cleanWorldSmoke')) { vmArg '-Doptic.cleanWorldSmoke=true'; programArgs '--quickPlaySingleplayer', project.cleanWorldSmoke }
+    if(project.hasProperty('cleanSmoke')) vmArg '-Doptic.cleanSmoke=true'
+    if(project.hasProperty('settingsSmoke')) vmArg '-Doptic.settingsSmoke=true'
+    if(project.hasProperty('audioSmoke')) vmArg '-Doptic.audioSmoke=true'
+    if(project.hasProperty('smokeResolution')) vmArg "-Doptic.smokeResolution=${project.smokeResolution}"
+    if(project.hasProperty('smokeFps')) vmArg "-Doptic.smokeFps=${project.smokeFps}"
+    if(project.hasProperty('smokeCodec')) vmArg "-Doptic.smokeCodec=${project.smokeCodec}"
+    if(project.hasProperty('exitSmoke')) vmArg '-Doptic.exitSmoke=true'
+    if(project.hasProperty('legacyCapture')) vmArg '-Doptic.forceLegacyCapture=true'
+    if(project.hasProperty('lifecycleSmoke')) vmArg '-Doptic.lifecycleSmoke=true'
+    if(project.hasProperty('smokeSeconds')) vmArg "-Doptic.smokeSeconds=${project.smokeSeconds}"
+}
+tasks.register('integrationTest', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.optic.encoding.EncoderIntegration'
+    args layout.buildDirectory.dir('integration').get().asFile.absolutePath
+}
+tasks.register('advancedIntegrationTest', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.optic.encoding.AdvancedIntegration'
+    args layout.buildDirectory.dir('advanced-integration').get().asFile.absolutePath
+}
+tasks.register('scaleBenchmark', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.optic.capture.ScaleBenchmark'
+    args layout.buildDirectory.dir('scale-benchmark').get().asFile.absolutePath
+}
+tasks.register('replayIntegrationTest', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.optic.replay.ReplayIntegration'
+    args layout.buildDirectory.dir('replay-integration').get().asFile.absolutePath
+}
+tasks.register('bootstrapTest', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.optic.encoding.BootstrapIntegration'
+    environment 'Path', ''
+    environment 'PATH', ''
+    args layout.buildDirectory.dir('bootstrap').get().asFile.absolutePath
+}
+tasks.register('audioIntegrationTest', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.optic.audio.WindowsAudioIntegration'
+    args layout.buildDirectory.dir('audio-integration').get().asFile.absolutePath
+}
+tasks.register('recorderRegression') {
+    group = 'verification'
+    description = 'Unit, encoding/recovery, replay/markers, advanced codec and process audio checks; no release packaging.'
+    dependsOn test, tasks.named('integrationTest'), tasks.named('replayIntegrationTest'), tasks.named('advancedIntegrationTest'), tasks.named('audioIntegrationTest')
+}
+
+// Keep worlds and options isolated across Minecraft versions.
+loom.runs.client {
+    runDir rootProject.file('run/' + project.minecraft_version).absolutePath
+    if(project.hasProperty('worldSmoke') && modern) {
+        vmArg '-Doptic.worldSmoke=true'
+        vmArg '-Doptic.smokeHideHud=true'
+        programArgs '--quickPlaySingleplayer', 'Optic V4 Validation'
+    }
+}
+tasks.register('collectJar', Copy) {
+    dependsOn tasks.named('build')
+    from(loomx.modJar.flatMap { it.archiveFile })
+    into(rootProject.layout.projectDirectory.dir('dist'))
+    rename { "optic-${project.mod_version}-mc${project.minecraft_version}.jar" }
+}
+
+// Loom shares the asset cache across targets. Declare ordering for multi-client runs.
+tasks.matching { it.name in ['runClient', 'productionSmoke'] }.configureEach {
+    mustRunAfter(rootProject.subprojects.collect { it.path + ':downloadAssets' })
+}

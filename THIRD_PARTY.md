@@ -1,0 +1,11 @@
+# Binary provenance and distribution review
+
+Optic invokes FFmpeg as a separate process. It first accepts a working executable from an absolute PATH directory. That is a user-managed installation and does not receive a publisher-integrity claim.
+
+Automatic Windows x64 setup uses only `https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0.2-essentials_build.zip`, pinned SHA-256 `60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba`. Redirects are refused. Download/extraction have size limits, cancellation and deadlines; archive paths are never used as destinations. An installer lock coordinates instances. Cached executable digests are checked against the local receipt and startup is tested; corrupted receipts trigger a fresh verified archive download. The local receipt detects corruption, not a malicious actor able to rewrite both the executable and receipt.
+
+No floating latest URL or silent binary update is used. A release update must review publisher provenance, replace the pinned URL/hash together and repeat bootstrap, codec, mux, recovery and audio tests. Check upstream security advisories as part of maintenance. A missing or changed pinned archive fails safely and allows a user-managed FFmpeg installation; it must never trigger a search for random binaries.
+
+FFmpeg licensing depends on its enabled components; GPL components change the applicable FFmpeg license. Consult the [official FFmpeg license guidance](https://ffmpeg.org/legal.html) and the exact build configuration. The selected publisher provides build/source information on its [builds page](https://www.gyan.dev/ffmpeg/builds/). This project does not bundle the FFmpeg executable in its mod JAR. Before distributing binaries or a bundled installer, retain the applicable license texts, exact corresponding source/build instructions and required notices; review actual distribution obligations. No distribution compliance certification is claimed here.
+
+The Windows audio helper is built from this repository's source, not downloaded. Publication also requires selecting the project's own license and reviewing dependency notices; this development pass does not choose a license on the owner's behalf.
