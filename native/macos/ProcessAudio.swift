@@ -141,6 +141,10 @@ struct ProcessAudio {
     static func main() async {
         signal(SIGPIPE, SIG_IGN)
         guard #available(macOS 13.0, *) else { fail("Minecraft audio requires macOS 13 Ventura or newer.") }
+        if CommandLine.arguments.dropFirst().first == "--version" {
+            print("Optic Mac audio helper 1; OPM1; macOS 13+; 48000 Hz stereo")
+            return
+        }
         if CommandLine.arguments.dropFirst().first == "--request-permission" {
             let granted = CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess()
             FileHandle.standardError.write(Data((granted ? "Permission granted. Restart Minecraft if capture is still unavailable.\n" : "Allow Screen & System Audio Recording in System Settings, then restart Minecraft.\n").utf8))

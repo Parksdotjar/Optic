@@ -12,5 +12,5 @@ done
 xcrun lipo -create "$output_dir/optic-process-audio-arm64" "$output_dir/optic-process-audio-x86_64" -output "$output_dir/optic-process-audio"
 codesign --force --sign - --identifier dev.optic.process-audio "$output_dir/optic-process-audio"
 codesign --verify --strict "$output_dir/optic-process-audio"
-xcrun lipo -verify_arch arm64 x86_64 "$output_dir/optic-process-audio"
+xcrun lipo "$output_dir/optic-process-audio" -verify_arch arm64 x86_64
 rm -f "$output_dir/optic-process-audio-arm64" "$output_dir/optic-process-audio-x86_64"
