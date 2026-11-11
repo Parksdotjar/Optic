@@ -17,6 +17,32 @@ jobs:
         run: sh native/macos/build.sh "$RUNNER_TEMP/mac-audio"
       - name: Check native startup
         run: '"$RUNNER_TEMP/mac-audio/optic-process-audio" --version'
+      - name: Verify pinned FFmpeg and two separate audio tracks
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$(uname -m)" = arm64 ]; then
+            asset=ffmpeg-darwin-arm64
+            expected=a90e3db6a3fd35f6074b013f948b1aa45b31c6375489d39e572bea3f18336584
+          else
+            asset=ffmpeg-darwin-x64
+            expected=ebdddc936f61e14049a2d4b549a412b8a40deeff6540e58a9f2a2da9e6b18894
+          fi
+          ffmpeg="$RUNNER_TEMP/optic-ffmpeg"
+          curl --fail --location --silent --show-error --proto '=https' --proto-redir '=https' --max-redirs 2 \
+            "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/$asset" -o "$ffmpeg"
+          echo "$expected  $ffmpeg" | shasum -a 256 -c -
+          chmod 700 "$ffmpeg"
+          "$ffmpeg" -hide_banner -version
+          "$ffmpeg" -hide_banner -loglevel error -nostdin \
+            -f lavfi -i 'color=s=160x90:r=30:d=1' \
+            -f lavfi -i 'sine=frequency=440:sample_rate=48000:duration=1' \
+            -f lavfi -i 'sine=frequency=880:sample_rate=48000:duration=1' \
+            -map 0:v -map 1:a -map 2:a -c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a aac \
+            -metadata:s:a:0 'title=Minecraft (including mod audio)' -metadata:s:a:1 'title=Microphone' \
+            "$RUNNER_TEMP/two-tracks.mp4"
+          "$ffmpeg" -hide_banner -loglevel error -nostdin -i "$RUNNER_TEMP/two-tracks.mp4" \
+            -map 0:v -map 0:a:0 -map 0:a:1 -f null -
       - name: Record checksum
         run: shasum -a 256 "$RUNNER_TEMP/mac-audio/optic-process-audio"
       - uses: actions/upload-artifact@v4
