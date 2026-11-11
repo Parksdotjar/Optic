@@ -1,0 +1,21 @@
+name: Build Mac audio helper
+on:
+  push:
+    branches: ['codex/native-audio-*']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  helper:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and sign universal helper
+        run: sh native/macos/build.sh "$RUNNER_TEMP/mac-audio"
+      - name: Record checksum
+        run: shasum -a 256 "$RUNNER_TEMP/mac-audio/optic-process-audio"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: optic-mac-audio-helper
+          path: ${{ runner.temp }}/mac-audio/optic-process-audio
+          if-no-files-found: error
